@@ -1,3 +1,6 @@
+🚀 Live Demo
+https://agentic-ai-hackathon-with-ibmakshaya-kcehfvjgdrgkjsumqmczs7.streamlit.app/
+
 ### **WorkBuddy – Unified HR & IT Copilot Powered by IBM watsonx Orchestrate**
 
 ---
