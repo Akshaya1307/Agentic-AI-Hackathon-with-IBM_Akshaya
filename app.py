@@ -1,8 +1,18 @@
-# app.py — Pro UI + Uses Workflow Logs
+# app.py — WorkBuddy LLM-Powered Employee Copilot
 
 import streamlit as st
-from backend import handle_user_message, ConversationContext, WORKFLOW_LOGS
 import datetime
+
+from backend import (
+    handle_user_message,
+    ConversationContext,
+    WORKFLOW_LOGS,
+)
+
+
+# ------------------------------------------------------------
+# PAGE CONFIGURATION
+# ------------------------------------------------------------
 
 st.set_page_config(
     page_title="WorkBuddy – HR & IT Copilot",
@@ -10,190 +20,543 @@ st.set_page_config(
     layout="wide",
 )
 
-# ------------------------------------------------------------
-# SIDEBAR
-# ------------------------------------------------------------
-with st.sidebar:
-    st.markdown("## 🤖 WorkBuddy Copilot")
-    st.markdown("### *Unified HR & IT Automation*")
-    
-    st.markdown("##### 👑 Logged in as:")
-    st.success("**Naga Akshaya Boyidi**")
-
-    st.markdown("---")
-    st.markdown("### 🔧 Powered Conceptually By")
-    st.markdown("- **IBM watsonx Orchestrate**")
-    st.markdown("- **IBM watsonx.ai**")
-    st.markdown("- **IBM Cloudant**")
-    
-    st.markdown("---")
-    st.markdown("### ⚡ Quick Actions")
-
-    if st.button("Check Leave Balance"):
-        st.session_state.messages.append(("user", "How many casual leaves do I have?"))
-
-    if st.button("Request Salesforce Access"):
-        st.session_state.messages.append(("user", "I need Salesforce access."))
-
-    if st.button("Start Analyst Onboarding"):
-        st.session_state.messages.append(("user", "Start onboarding a new analyst"))
-
-    if st.button("Show HR Leave Policy"):
-        st.session_state.messages.append(("user", "Show HR leave policy"))
-
-    st.markdown("---")
-    st.info("💡 Try your own task in the chat – onboarding, access, HR queries, etc.")
-
 
 # ------------------------------------------------------------
-# SESSION STATE INIT
+# SESSION STATE INITIALIZATION
 # ------------------------------------------------------------
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 if "ctx" not in st.session_state:
     st.session_state.ctx = ConversationContext()
 
-if "tickets" not in st.session_state:
-    st.session_state.tickets = []
+if "activity" not in st.session_state:
+    st.session_state.activity = []
 
-if "onboard_cases" not in st.session_state:
-    st.session_state.onboard_cases = []
+
+# ------------------------------------------------------------
+# SIDEBAR
+# ------------------------------------------------------------
+
+with st.sidebar:
+
+    st.markdown("## 🤖 WorkBuddy Copilot")
+    st.markdown("### *Unified Employee Assistance*")
+
+    st.markdown("##### 👑 Logged in as:")
+    st.success("**Naga Akshaya Boyidi**")
+
+    st.markdown("---")
+
+    st.markdown("### 🧠 AI Capabilities")
+
+    st.markdown(
+        """
+        - 🟣 HR & Policy Assistance
+        - 🔵 IT Support Guidance
+        - 🟢 Onboarding Assistance
+        - 📝 Email & Letter Drafting
+        - 📚 Workplace Information
+        - 💬 Conversational Help
+        """
+    )
+
+    st.markdown("---")
+
+    st.markdown("### 🔧 Powered Conceptually By")
+
+    st.markdown("- **IBM watsonx Orchestrate**")
+    st.markdown("- **IBM watsonx.ai**")
+    st.markdown("- **IBM Cloudant**")
+
+    st.markdown("---")
+
+    # --------------------------------------------------------
+    # QUICK ACTIONS
+    # --------------------------------------------------------
+
+    st.markdown("### ⚡ Try WorkBuddy")
+
+    st.caption(
+        "These are natural conversation starters. "
+        "You can also ask anything in your own words."
+    )
+
+    if st.button(
+        "📅 I need help with leave",
+        use_container_width=True,
+    ):
+        st.session_state.pending_prompt = (
+            "I have a personal event coming up and may need leave. "
+            "Can you tell me what I should do?"
+        )
+
+    if st.button(
+        "📜 Explain an HR policy",
+        use_container_width=True,
+    ):
+        st.session_state.pending_prompt = (
+            "Can you explain the relevant HR policies I should know as an employee?"
+        )
+
+    if st.button(
+        "📧 Help me write an email",
+        use_container_width=True,
+    ):
+        st.session_state.pending_prompt = (
+            "I need help formatting a professional email to my manager."
+        )
+
+    if st.button(
+        "💻 I need IT help",
+        use_container_width=True,
+    ):
+        st.session_state.pending_prompt = (
+            "I'm having an IT-related problem. Can you help me figure out what to do?"
+        )
+
+    if st.button(
+        "🟢 Help with onboarding",
+        use_container_width=True,
+    ):
+        st.session_state.pending_prompt = (
+            "I'm joining a new team soon. What should I prepare for onboarding?"
+        )
+
+    st.markdown("---")
+
+    st.info(
+        "💡 You don't need to use specific commands. "
+        "Just describe your situation naturally."
+    )
 
 
 # ------------------------------------------------------------
 # HEADER
 # ------------------------------------------------------------
+
 st.title("🤖 WorkBuddy – Unified HR & IT Copilot")
-st.caption("Agentic AI for HR, IT & Onboarding – conceptually powered by IBM watsonx Orchestrate.")
 
-tabs = st.tabs(["💬 Chat", "📊 Dashboard"])
+st.caption(
+    "AI-powered employee assistance for HR, IT & onboarding — "
+    "conceptually powered by IBM watsonx Orchestrate."
+)
+
 
 # ------------------------------------------------------------
-# TAB 1 – CHAT
+# TABS
 # ------------------------------------------------------------
+
+tabs = st.tabs(
+    [
+        "💬 Chat",
+        "📊 Dashboard",
+    ]
+)
+
+
+# ============================================================
+# TAB 1 — CHAT
+# ============================================================
+
 with tabs[0]:
+
     st.markdown("### 💬 Chat with WorkBuddy")
 
-    # show history
-    for role, content in st.session_state.messages:
+    st.caption(
+        "Ask questions naturally. WorkBuddy can explain policies, "
+        "guide you through workplace tasks, and help create professional messages."
+    )
+
+    # --------------------------------------------------------
+    # DISPLAY CHAT HISTORY
+    # --------------------------------------------------------
+
+    for message in st.session_state.messages:
+
+        role = message["role"]
+        content = message["content"]
+
         if role == "user":
+
             with st.chat_message("user"):
-                st.markdown(f"**👤 You:**<br>{content}", unsafe_allow_html=True)
+                st.markdown(
+                    f"**👤 You**\n\n{content}"
+                )
+
         else:
+
             with st.chat_message("assistant"):
-                st.markdown(content, unsafe_allow_html=True)
 
-    # merge quick actions into actual input
-    default_prompt = None
-    if st.session_state.messages and st.session_state.messages[-1][0] == "user" and \
-            st.session_state.messages[-1][1] not in [m[1] for m in st.session_state.messages[:-1]]:
-        # last user message was from sidebar button
-        default_prompt = st.session_state.messages[-1][1]
+                agent = message.get("agent")
 
-    user_input = st.chat_input("Ask WorkBuddy anything about HR, IT, or onboarding...")
+                if agent:
+                    st.markdown(
+                        f"**{agent}**"
+                    )
 
-    # If user typed via chat_input, that's the latest prompt
+                st.markdown(
+                    content,
+                    unsafe_allow_html=True,
+                )
+
+
+    # --------------------------------------------------------
+    # CHAT INPUT
+    # --------------------------------------------------------
+
+    user_input = st.chat_input(
+        "Tell WorkBuddy what you need help with..."
+    )
+
+
+    # --------------------------------------------------------
+    # HANDLE QUICK ACTION
+    # --------------------------------------------------------
+
+    if "pending_prompt" in st.session_state:
+
+        user_input = st.session_state.pending_prompt
+
+        del st.session_state.pending_prompt
+
+
+    # --------------------------------------------------------
+    # PROCESS USER MESSAGE
+    # --------------------------------------------------------
+
     if user_input:
-        # USER MSG
-        st.session_state.messages.append(("user", user_input))
+
+        # ----------------------------------------------------
+        # STORE USER MESSAGE
+        # ----------------------------------------------------
+
+        st.session_state.messages.append(
+            {
+                "role": "user",
+                "content": user_input,
+            }
+        )
+
         with st.chat_message("user"):
-            st.markdown(f"**👤 You:**<br>{user_input}", unsafe_allow_html=True)
 
-        # BACKEND
-        reply, ctx = handle_user_message(user_input, st.session_state.ctx)
-        st.session_state.ctx = ctx
-
-        # Which agent is likely responding (for label only)
-        lower = user_input.lower()
-        if "leave" in lower or "policy" in lower:
-            agent = "🟣 HR Agent"
-        elif "access" in lower or "salesforce" in lower or "jira" in lower or "vpn" in lower:
-            agent = "🔵 IT Agent"
-        elif "onboard" in lower or "joining" in lower or "new analyst" in lower:
-            agent = "🟢 Onboarding Agent"
-        else:
-            agent = "🤖 General Assistant"
-
-        with st.chat_message("assistant"):
-            st.markdown(f"**{agent} responding…**")
-            st.markdown(reply, unsafe_allow_html=True)
-
-        # store in history
-        st.session_state.messages.append(("assistant", reply))
-
-        # track basic ticket/onboarding info for dashboard view
-        if "Ticket:" in reply:
-            st.session_state.tickets.append(
-                {
-                    "task": user_input,
-                    "time": datetime.datetime.now().strftime("%H:%M:%S"),
-                    "details": reply,
-                }
-            )
-
-        if "Started onboarding workflow" in reply or "Started onboarding workflow for" in reply:
-            st.session_state.onboard_cases.append(
-                {
-                    "task": user_input,
-                    "time": datetime.datetime.now().strftime("%H:%M:%S"),
-                    "details": reply,
-                }
+            st.markdown(
+                f"**👤 You**\n\n{user_input}"
             )
 
 
-# ------------------------------------------------------------
-# TAB 2 – DASHBOARD
-# ------------------------------------------------------------
+        # ----------------------------------------------------
+        # CALL BACKEND / LLM
+        # ----------------------------------------------------
+
+        try:
+
+            result = handle_user_message(
+                user_input,
+                st.session_state.ctx,
+            )
+
+
+            # ------------------------------------------------
+            # SUPPORT NEW BACKEND RESPONSE
+            #
+            # Expected:
+            #
+            # reply, ctx, metadata
+            #
+            # ------------------------------------------------
+
+            if len(result) == 3:
+
+                reply, ctx, metadata = result
+
+            else:
+
+                # Temporary compatibility with old backend
+                reply, ctx = result
+
+                metadata = {
+                    "agent": "🤖 WorkBuddy",
+                    "intent": None,
+                    "actions": [],
+                }
+
+
+            st.session_state.ctx = ctx
+
+
+            # ------------------------------------------------
+            # EXTRACT RESPONSE INFORMATION
+            # ------------------------------------------------
+
+            agent = metadata.get(
+                "agent",
+                "🤖 WorkBuddy",
+            )
+
+            intent = metadata.get(
+                "intent"
+            )
+
+            actions = metadata.get(
+                "actions",
+                [],
+            )
+
+
+            # ------------------------------------------------
+            # DISPLAY ASSISTANT RESPONSE
+            # ------------------------------------------------
+
+            with st.chat_message("assistant"):
+
+                st.markdown(
+                    f"**{agent}**"
+                )
+
+                st.markdown(
+                    reply,
+                    unsafe_allow_html=True,
+                )
+
+
+            # ------------------------------------------------
+            # STORE ASSISTANT RESPONSE
+            # ------------------------------------------------
+
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": reply,
+                    "agent": agent,
+                    "intent": intent,
+                }
+            )
+
+
+            # ------------------------------------------------
+            # STORE ACTIVITY
+            # ------------------------------------------------
+
+            st.session_state.activity.append(
+                {
+                    "time": datetime.datetime.now().strftime(
+                        "%H:%M:%S"
+                    ),
+                    "agent": agent,
+                    "intent": intent or "general",
+                    "message": user_input,
+                    "actions": actions,
+                }
+            )
+
+
+        except Exception as e:
+
+            # ------------------------------------------------
+            # FRIENDLY ERROR HANDLING
+            # ------------------------------------------------
+
+            error_message = (
+                "⚠️ **I'm having trouble processing that right now.**\n\n"
+                "Please try again in a moment."
+            )
+
+            with st.chat_message("assistant"):
+
+                st.markdown(
+                    "**🤖 WorkBuddy**"
+                )
+
+                st.markdown(
+                    error_message
+                )
+
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": error_message,
+                    "agent": "🤖 WorkBuddy",
+                }
+            )
+
+            # Keep actual error out of the user-facing UI
+            # but print it for local debugging.
+            print(
+                "WorkBuddy backend error:",
+                repr(e)
+            )
+
+
+# ============================================================
+# TAB 2 — DASHBOARD
+# ============================================================
+
 with tabs[1]:
-    st.markdown("## 📊 WorkBuddy Activity Dashboard")
 
-    col1, col2 = st.columns(2)
+    st.markdown(
+        "## 📊 WorkBuddy Activity Dashboard"
+    )
+
+    st.caption(
+        "Overview of recent conversations and agent/workflow activity."
+    )
+
+
+    # --------------------------------------------------------
+    # SUMMARY CARDS
+    # --------------------------------------------------------
+
+    total_conversations = len(
+        st.session_state.activity
+    )
+
+    total_workflows = len(
+        WORKFLOW_LOGS
+    )
+
+    col1, col2, col3 = st.columns(3)
+
 
     with col1:
-        st.markdown("### 🛠️ Recent IT Access Requests")
-        if st.session_state.tickets:
-            for t in st.session_state.tickets:
-                st.info(
-                    f"""
-**Task:** {t['task']}  
-**Time:** {t['time']}  
 
-{t['details']}
-                    """
-                )
-        else:
-            st.warning("No IT access requests yet. Ask for Salesforce, Jira, or VPN access from the chat.")
+        st.metric(
+            "💬 Conversations",
+            total_conversations,
+        )
+
 
     with col2:
-        st.markdown("### 🟢 Onboarding Workflows")
-        if st.session_state.onboard_cases:
-            for ob in st.session_state.onboard_cases:
-                st.success(
-                    f"""
-**Workflow:** {ob['task']}  
-**Started:** {ob['time']}  
 
-{ob['details']}
-                    """
-                )
+        st.metric(
+            "⚙️ Workflow Events",
+            total_workflows,
+        )
+
+
+    with col3:
+
+        if st.session_state.activity:
+
+            latest_agent = st.session_state.activity[-1]["agent"]
+
         else:
-            st.warning("No onboarding workflows started yet. Try: *\"Start onboarding a new analyst\"* in chat.")
+
+            latest_agent = "—"
+
+        st.metric(
+            "🤖 Latest Agent",
+            latest_agent,
+        )
+
 
     st.markdown("---")
-    st.markdown("### 📜 Workflow Execution Logs (simulating watsonx Orchestrate)")
+
+
+    # --------------------------------------------------------
+    # RECENT CONVERSATIONS
+    # --------------------------------------------------------
+
+    st.markdown(
+        "### 💬 Recent WorkBuddy Activity"
+    )
+
+    if st.session_state.activity:
+
+        for activity in reversed(
+            st.session_state.activity[-10:]
+        ):
+
+            with st.container():
+
+                st.markdown(
+                    f"""
+**[{activity['time']}]** {activity['agent']}
+
+**User:** {activity['message']}
+
+**Intent:** `{activity['intent']}`
+"""
+                )
+
+                if activity.get("actions"):
+
+                    st.markdown(
+                        "**Actions / Assistance:**"
+                    )
+
+                    for action in activity["actions"]:
+
+                        st.markdown(
+                            f"- {action}"
+                        )
+
+                st.markdown("---")
+
+    else:
+
+        st.info(
+            "No conversations yet. "
+            "Start chatting with WorkBuddy to see activity here."
+        )
+
+
+    # --------------------------------------------------------
+    # WORKFLOW LOGS
+    # --------------------------------------------------------
+
+    st.markdown(
+        "### 📜 Workflow & Agent Execution Logs"
+    )
+
+    st.caption(
+        "These entries represent the skills/actions executed "
+        "by WorkBuddy and can be used to visualize orchestration."
+    )
+
 
     if WORKFLOW_LOGS:
-        for log in reversed(WORKFLOW_LOGS[-15:]):  # show last 15 entries
+
+        for log in reversed(
+            WORKFLOW_LOGS[-15:]
+        ):
+
+            ref_id = log.get(
+                "ref_id"
+            ) or "-"
+
+            details = log.get(
+                "details"
+            ) or "-"
+
             st.markdown(
                 f"""
-**[{log['time']}]** `{log['agent']}`  
-• Skill: `{log['skill']}`  
-• Status: **{log['status']}**  
-• Ref: `{log['ref_id'] or '-'}`
-• Details: {log['details'] or '-'}
-                """
+**[{log.get('time', '-')} ]** `{log.get('agent', 'WorkBuddy')}`
+
+• **Skill:** `{log.get('skill', '-')}`  
+• **Status:** **{log.get('status', '-')}**  
+• **Ref:** `{ref_id}`  
+• **Details:** {details}
+"""
             )
+
             st.markdown("---")
+
     else:
-        st.info("No workflow logs yet – interact with WorkBuddy in the chat to generate some.")
+
+        st.info(
+            "No workflow events yet."
+        )
+
+
+# ------------------------------------------------------------
+# FOOTER
+# ------------------------------------------------------------
+
+st.markdown("---")
+
+st.caption(
+    "🤖 WorkBuddy — AI-powered employee assistance | "
+    "HR • IT • Onboarding"
+)
