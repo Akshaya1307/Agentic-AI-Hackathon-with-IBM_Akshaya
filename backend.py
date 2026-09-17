@@ -40,6 +40,7 @@ GEMINI_MODEL = get_secret(
 )
 
 # Backup model used when the primary model is temporarily unavailable
+# or when the primary model reaches its quota.
 GEMINI_FALLBACK_MODEL = "gemini-3.7-flash"
 
 
@@ -432,12 +433,31 @@ offer to draft it.
 
                 error_message = str(e)
 
-                # Retry temporary Gemini capacity errors
+                # ------------------------------------------------
+                # Detect temporary capacity errors
+                # ------------------------------------------------
+
+                is_503_error = (
+                    "503" in error_message
+                    or "UNAVAILABLE" in error_message
+                )
+
+                # ------------------------------------------------
+                # Detect quota / rate-limit errors
+                # ------------------------------------------------
+
+                is_429_error = (
+                    "429" in error_message
+                    or "RESOURCE_EXHAUSTED" in error_message
+                    or "quota" in error_message.lower()
+                )
+
+                # ------------------------------------------------
+                # Retry temporary 503 errors
+                # ------------------------------------------------
+
                 if (
-                    (
-                        "503" in error_message
-                        or "UNAVAILABLE" in error_message
-                    )
+                    is_503_error
                     and attempt < 2
                 ):
 
@@ -445,22 +465,37 @@ offer to draft it.
 
                     continue
 
-                # If primary model is unavailable after retries,
-                # move to the fallback model.
+                # ------------------------------------------------
+                # 503 after retries:
+                # move to fallback model
+                # ------------------------------------------------
+
                 if (
-                    (
-                        "503" in error_message
-                        or "UNAVAILABLE" in error_message
-                    )
+                    is_503_error
                     and attempt == 2
                 ):
 
                     break
 
+                # ------------------------------------------------
+                # 429 quota error:
+                # immediately move to fallback model
+                #
+                # We do NOT waste retries on a daily quota error.
+                # ------------------------------------------------
+
+                if is_429_error:
+
+                    break
+
+                # ------------------------------------------------
                 # Do not hide other API/configuration errors.
+                # ------------------------------------------------
+
                 raise
 
     if last_error is not None:
+
         raise last_error
 
     raise RuntimeError(
@@ -528,7 +563,6 @@ def handle_user_message(
 
         )
 
-
     # --------------------------------------------------------
     # Save user message
     # --------------------------------------------------------
@@ -541,7 +575,6 @@ def handle_user_message(
 
     })
 
-
     try:
 
         result = ask_workbuddy_llm(
@@ -551,7 +584,6 @@ def handle_user_message(
             context
 
         )
-
 
         # ----------------------------------------------------
         # Update context
@@ -567,7 +599,6 @@ def handle_user_message(
 
         }
 
-
         # ----------------------------------------------------
         # Save assistant response
         # ----------------------------------------------------
@@ -579,7 +610,6 @@ def handle_user_message(
             "content": result.response
 
         })
-
 
         # ----------------------------------------------------
         # Workflow logging
@@ -602,7 +632,6 @@ def handle_user_message(
 
         )
 
-
         return (
 
             result.response,
@@ -621,11 +650,9 @@ def handle_user_message(
 
         )
 
-
     except Exception as e:
 
         error_message = str(e)
-
 
         add_workflow_log(
 
@@ -637,13 +664,11 @@ def handle_user_message(
 
         )
 
-
         fallback = fallback_response(
 
             user_message
 
         )
-
 
         context.history.append({
 
@@ -652,7 +677,6 @@ def handle_user_message(
             "content": fallback.response
 
         })
-
 
         return (
 
