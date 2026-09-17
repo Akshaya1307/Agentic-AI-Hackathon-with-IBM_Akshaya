@@ -395,7 +395,32 @@ offer to draft it.
 
     last_error = None
 
-    for model_name in models_to_try:
+    for model_index, model_name in enumerate(models_to_try):
+
+        is_fallback_model = model_index > 0
+
+        # ----------------------------------------------------
+        # Log which model is being attempted
+        # ----------------------------------------------------
+
+        if is_fallback_model:
+
+            add_workflow_log(
+                action=f"Switching to fallback model: {model_name}",
+                status="Started",
+                details=(
+                    f"Primary model {GEMINI_MODEL} was unavailable "
+                    f"or reached its quota."
+                )
+            )
+
+        else:
+
+            add_workflow_log(
+                action=f"Trying primary model: {model_name}",
+                status="Started",
+                details="Starting Gemini response generation."
+            )
 
         for attempt in range(3):
 
@@ -422,8 +447,22 @@ offer to draft it.
                 if response.parsed is None:
 
                     raise RuntimeError(
-                        "Gemini returned an empty or invalid response."
+                        f"Gemini model {model_name} returned "
+                        "an empty or invalid response."
                     )
+
+                # ------------------------------------------------
+                # Successful response
+                # ------------------------------------------------
+
+                add_workflow_log(
+                    action=f"LLM response generated: {model_name}",
+                    status="Completed",
+                    details=(
+                        f"WorkBuddy successfully received a response "
+                        f"from {model_name}."
+                    )
+                )
 
                 return response.parsed
 
@@ -453,6 +492,19 @@ offer to draft it.
                 )
 
                 # ------------------------------------------------
+                # Log the model-specific failure
+                # ------------------------------------------------
+
+                add_workflow_log(
+                    action=f"Model error: {model_name}",
+                    status="Failed",
+                    details=(
+                        f"Attempt {attempt + 1}/3 | "
+                        f"Error: {error_message}"
+                    )
+                )
+
+                # ------------------------------------------------
                 # Retry temporary 503 errors
                 # ------------------------------------------------
 
@@ -460,6 +512,15 @@ offer to draft it.
                     is_503_error
                     and attempt < 2
                 ):
+
+                    add_workflow_log(
+                        action=f"Retrying {model_name}",
+                        status="Retrying",
+                        details=(
+                            f"Temporary 503 capacity error. "
+                            f"Retry {attempt + 2}/3 scheduled."
+                        )
+                    )
 
                     time.sleep(2 ** attempt)
 
@@ -475,16 +536,32 @@ offer to draft it.
                     and attempt == 2
                 ):
 
+                    add_workflow_log(
+                        action=f"Fallback triggered from {model_name}",
+                        status="Fallback",
+                        details=(
+                            "Primary model remained unavailable "
+                            "after 3 attempts."
+                        )
+                    )
+
                     break
 
                 # ------------------------------------------------
                 # 429 quota error:
                 # immediately move to fallback model
-                #
-                # We do NOT waste retries on a daily quota error.
                 # ------------------------------------------------
 
                 if is_429_error:
+
+                    add_workflow_log(
+                        action=f"Quota fallback triggered from {model_name}",
+                        status="Fallback",
+                        details=(
+                            "Quota or rate-limit error detected. "
+                            "Moving to the next available model."
+                        )
+                    )
 
                     break
 
@@ -494,7 +571,20 @@ offer to draft it.
 
                 raise
 
+    # ========================================================
+    # ALL MODELS FAILED
+    # ========================================================
+
     if last_error is not None:
+
+        add_workflow_log(
+            action="All Gemini models failed",
+            status="Failed",
+            details=(
+                "Both the primary and fallback models were "
+                "unable to generate a response."
+            )
+        )
 
         raise last_error
 
