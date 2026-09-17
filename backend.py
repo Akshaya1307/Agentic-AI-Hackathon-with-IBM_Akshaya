@@ -39,6 +39,9 @@ GEMINI_MODEL = get_secret(
     "gemini-3.8-flash"
 )
 
+# Backup model used when the primary model is temporarily unavailable
+GEMINI_FALLBACK_MODEL = "gemini-3.7-flash"
+
 
 # ============================================================
 # GEMINI CLIENT
@@ -381,60 +384,88 @@ offer to draft it.
 """
 
     # ========================================================
-    # RETRY TEMPORARY GEMINI CAPACITY ERRORS
+    # PRIMARY MODEL + FALLBACK MODEL
     # ========================================================
 
-    for attempt in range(3):
+    models_to_try = [
+        GEMINI_MODEL,
+        GEMINI_FALLBACK_MODEL
+    ]
 
-        try:
+    last_error = None
 
-            response = client.models.generate_content(
+    for model_name in models_to_try:
 
-                model=GEMINI_MODEL,
+        for attempt in range(3):
 
-                contents=prompt,
+            try:
 
-                config=types.GenerateContentConfig(
+                response = client.models.generate_content(
 
-                    system_instruction=SYSTEM_INSTRUCTION,
+                    model=model_name,
 
-                    temperature=0.4,
+                    contents=prompt,
 
-                    response_mime_type="application/json",
+                    config=types.GenerateContentConfig(
 
-                    response_schema=WorkBuddyResponse
+                        system_instruction=SYSTEM_INSTRUCTION,
+
+                        response_mime_type="application/json",
+
+                        response_schema=WorkBuddyResponse
+
+                    )
 
                 )
 
-            )
+                if response.parsed is None:
 
-            if response.parsed is None:
+                    raise RuntimeError(
+                        "Gemini returned an empty or invalid response."
+                    )
 
-                raise RuntimeError(
-                    "Gemini returned an empty or invalid response."
-                )
+                return response.parsed
 
-            return response.parsed
+            except Exception as e:
 
-        except Exception as e:
+                last_error = e
 
-            error_message = str(e)
+                error_message = str(e)
 
-            # Retry only temporary service-capacity errors
-            if (
-                (
-                    "503" in error_message
-                    or "UNAVAILABLE" in error_message
-                )
-                and attempt < 2
-            ):
+                # Retry temporary Gemini capacity errors
+                if (
+                    (
+                        "503" in error_message
+                        or "UNAVAILABLE" in error_message
+                    )
+                    and attempt < 2
+                ):
 
-                # Wait before retrying
-                time.sleep(2 ** attempt)
+                    time.sleep(2 ** attempt)
 
-                continue
+                    continue
 
-            raise
+                # If primary model is unavailable after retries,
+                # move to the fallback model.
+                if (
+                    (
+                        "503" in error_message
+                        or "UNAVAILABLE" in error_message
+                    )
+                    and attempt == 2
+                ):
+
+                    break
+
+                # Do not hide other API/configuration errors.
+                raise
+
+    if last_error is not None:
+        raise last_error
+
+    raise RuntimeError(
+        "No Gemini model was available."
+    )
 
 
 # ============================================================
