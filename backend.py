@@ -23,9 +23,8 @@ def get_secret(name: str, default=None):
     """
 
     try:
-        value = st.secrets.get(name)
-        if value:
-            return value
+        if name in st.secrets:
+            return st.secrets[name]
     except Exception:
         pass
 
