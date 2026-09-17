@@ -1,4 +1,5 @@
 import os
+import time
 from dataclasses import dataclass, field
 from typing import List, Dict, Any
 
@@ -32,6 +33,7 @@ def get_secret(name: str, default=None):
 
 
 GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
+
 GEMINI_MODEL = get_secret(
     "GEMINI_MODEL",
     "gemini-3.8-flash"
@@ -378,33 +380,61 @@ If the user appears to need an email, letter, request, or message, proactively
 offer to draft it.
 """
 
-    response = client.models.generate_content(
+    # ========================================================
+    # RETRY TEMPORARY GEMINI CAPACITY ERRORS
+    # ========================================================
 
-        model=GEMINI_MODEL,
+    for attempt in range(3):
 
-        contents=prompt,
+        try:
 
-        config=types.GenerateContentConfig(
+            response = client.models.generate_content(
 
-            system_instruction=SYSTEM_INSTRUCTION,
+                model=GEMINI_MODEL,
 
-            temperature=0.4,
+                contents=prompt,
 
-            response_mime_type="application/json",
+                config=types.GenerateContentConfig(
 
-            response_schema=WorkBuddyResponse
+                    system_instruction=SYSTEM_INSTRUCTION,
 
-        )
+                    temperature=0.4,
 
-    )
+                    response_mime_type="application/json",
 
-    if response.parsed is None:
+                    response_schema=WorkBuddyResponse
 
-        raise RuntimeError(
-            "Gemini returned an empty or invalid response."
-        )
+                )
 
-    return response.parsed
+            )
+
+            if response.parsed is None:
+
+                raise RuntimeError(
+                    "Gemini returned an empty or invalid response."
+                )
+
+            return response.parsed
+
+        except Exception as e:
+
+            error_message = str(e)
+
+            # Retry only temporary service-capacity errors
+            if (
+                (
+                    "503" in error_message
+                    or "UNAVAILABLE" in error_message
+                )
+                and attempt < 2
+            ):
+
+                # Wait before retrying
+                time.sleep(2 ** attempt)
+
+                continue
+
+            raise
 
 
 # ============================================================
@@ -423,11 +453,10 @@ def fallback_response(
 
         response=(
             "I'm having trouble connecting to the AI service right now. "
-            "Please make sure the Gemini API is configured correctly and try again."
+            "Please try again in a moment."
         ),
 
         actions=[
-            "Check the AI configuration",
             "Try the message again"
         ],
 
@@ -579,7 +608,9 @@ def handle_user_message(
 
 
         fallback = fallback_response(
+
             user_message
+
         )
 
 
