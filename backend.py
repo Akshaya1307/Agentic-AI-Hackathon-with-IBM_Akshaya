@@ -1,8 +1,8 @@
 import os
-import json
 from dataclasses import dataclass, field
 from typing import List, Dict, Any
 
+import streamlit as st
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from google import genai
@@ -10,13 +10,33 @@ from google.genai import types
 
 
 # ============================================================
-# ENVIRONMENT
+# ENVIRONMENT & SECRETS
 # ============================================================
 
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+
+def get_secret(name: str, default=None):
+    """
+    Read configuration from Streamlit Secrets when deployed.
+    Fall back to environment variables for local development.
+    """
+
+    try:
+        value = st.secrets.get(name)
+        if value:
+            return value
+    except Exception:
+        pass
+
+    return os.getenv(name, default)
+
+
+GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
+GEMINI_MODEL = get_secret(
+    "GEMINI_MODEL",
+    "gemini-3.8-flash"
+)
 
 
 # ============================================================
@@ -26,7 +46,9 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 client = None
 
 if GEMINI_API_KEY:
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    client = genai.Client(
+        api_key=GEMINI_API_KEY
+    )
 
 
 # ============================================================
@@ -35,10 +57,18 @@ if GEMINI_API_KEY:
 
 @dataclass
 class ConversationContext:
+
     user_id: str = "akshaya"
+
     last_intent: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    history: List[Dict[str, str]] = field(default_factory=list)
+
+    metadata: Dict[str, Any] = field(
+        default_factory=dict
+    )
+
+    history: List[Dict[str, str]] = field(
+        default_factory=list
+    )
 
 
 # ============================================================
@@ -53,10 +83,15 @@ def add_workflow_log(
     status: str = "Completed",
     details: str = ""
 ):
+
     WORKFLOW_LOGS.append({
+
         "action": action,
+
         "status": status,
+
         "details": details
+
     })
 
 
@@ -272,7 +307,9 @@ def format_knowledge() -> str:
 # FORMAT CONVERSATION HISTORY
 # ============================================================
 
-def format_history(history: List[Dict[str, str]]) -> str:
+def format_history(
+    history: List[Dict[str, str]]
+) -> str:
 
     if not history:
         return "No previous conversation."
@@ -283,8 +320,15 @@ def format_history(history: List[Dict[str, str]]) -> str:
 
     for message in recent_history:
 
-        role = message.get("role", "user")
-        content = message.get("content", "")
+        role = message.get(
+            "role",
+            "user"
+        )
+
+        content = message.get(
+            "content",
+            ""
+        )
 
         formatted.append(
             f"{role.upper()}: {content}"
@@ -350,8 +394,16 @@ offer to draft it.
             response_mime_type="application/json",
 
             response_schema=WorkBuddyResponse
+
         )
+
     )
+
+    if response.parsed is None:
+
+        raise RuntimeError(
+            "Gemini returned an empty or invalid response."
+        )
 
     return response.parsed
 
@@ -360,7 +412,9 @@ offer to draft it.
 # FALLBACK RESPONSE
 # ============================================================
 
-def fallback_response(user_message: str):
+def fallback_response(
+    user_message: str
+):
 
     return WorkBuddyResponse(
 
@@ -379,6 +433,7 @@ def fallback_response(user_message: str):
         ],
 
         knowledge_used=[]
+
     )
 
 
@@ -396,30 +451,48 @@ def handle_user_message(
     if not user_message:
 
         return (
-            "Tell me what you need help with, and I'll do my best to assist.",
+
+            "Tell me what you need help with, "
+            "and I'll do my best to assist.",
+
             context,
+
             {
+
                 "agent": "🤖 WorkBuddy",
+
                 "intent": "empty_message",
+
                 "actions": []
+
             }
+
         )
+
 
     # --------------------------------------------------------
     # Save user message
     # --------------------------------------------------------
 
     context.history.append({
+
         "role": "user",
+
         "content": user_message
+
     })
+
 
     try:
 
         result = ask_workbuddy_llm(
+
             user_message,
+
             context
+
         )
+
 
         # ----------------------------------------------------
         # Update context
@@ -428,18 +501,26 @@ def handle_user_message(
         context.last_intent = result.intent
 
         context.metadata = {
+
             "agent": result.agent,
+
             "knowledge_used": result.knowledge_used
+
         }
+
 
         # ----------------------------------------------------
         # Save assistant response
         # ----------------------------------------------------
 
         context.history.append({
+
             "role": "assistant",
+
             "content": result.response
+
         })
+
 
         # ----------------------------------------------------
         # Workflow logging
@@ -452,10 +533,16 @@ def handle_user_message(
             status="Completed",
 
             details=(
+
                 f"Agent: {result.agent} | "
-                f"Knowledge: {', '.join(result.knowledge_used)}"
+
+                f"Knowledge: "
+                f"{', '.join(result.knowledge_used)}"
+
             )
+
         )
+
 
         return (
 
@@ -464,15 +551,22 @@ def handle_user_message(
             context,
 
             {
+
                 "agent": result.agent,
+
                 "intent": result.intent,
+
                 "actions": result.actions
+
             }
+
         )
+
 
     except Exception as e:
 
         error_message = str(e)
+
 
         add_workflow_log(
 
@@ -481,14 +575,23 @@ def handle_user_message(
             status="Failed",
 
             details=error_message
+
         )
 
-        fallback = fallback_response(user_message)
+
+        fallback = fallback_response(
+            user_message
+        )
+
 
         context.history.append({
+
             "role": "assistant",
+
             "content": fallback.response
+
         })
+
 
         return (
 
@@ -497,8 +600,13 @@ def handle_user_message(
             context,
 
             {
+
                 "agent": fallback.agent,
+
                 "intent": fallback.intent,
+
                 "actions": fallback.actions
+
             }
+
         )
