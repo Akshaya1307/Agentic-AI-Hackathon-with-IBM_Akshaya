@@ -1,31 +1,10 @@
-# backend.py
-# WorkBuddy — LLM-Powered Employee Copilot
-#
-# Core idea:
-# User message
-#      ↓
-# Gemini LLM
-#      ↓
-# Understand intent + context
-#      ↓
-# Ground response in WorkBuddy knowledge
-#      ↓
-# Generate helpful response
-#      ↓
-# Suggest useful next actions
-#
-# No SQL / no leave-balance management / no approval system.
-
-from dataclasses import dataclass, field
-from typing import Dict, Any, List, Tuple
-import datetime
-import json
 import os
-import uuid
+import json
+from dataclasses import dataclass, field
+from typing import List, Dict, Any
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
-
 from google import genai
 from google.genai import types
 
@@ -37,11 +16,7 @@ from google.genai import types
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-MODEL_NAME = os.getenv(
-    "GEMINI_MODEL",
-    "gemini-3.8-flash"
-)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 
 # ============================================================
@@ -51,47 +26,7 @@ MODEL_NAME = os.getenv(
 client = None
 
 if GEMINI_API_KEY:
-    client = genai.Client(
-        api_key=GEMINI_API_KEY
-    )
-
-
-# ============================================================
-# WORKFLOW LOGS
-# ============================================================
-
-WORKFLOW_LOGS: List[Dict[str, Any]] = []
-
-
-def make_id(prefix: str) -> str:
-    """Create a short reference ID."""
-    return f"{prefix}-{uuid.uuid4().hex[:6].upper()}"
-
-
-def log_workflow(
-    agent: str,
-    skill: str,
-    status: str,
-    ref_id: str | None = None,
-    details: str | None = None,
-):
-    """
-    Record an execution event.
-
-    These logs are displayed in the WorkBuddy dashboard
-    to visualize the agentic workflow.
-    """
-
-    WORKFLOW_LOGS.append(
-        {
-            "time": datetime.datetime.now().strftime("%H:%M:%S"),
-            "agent": agent,
-            "skill": skill,
-            "status": status,
-            "ref_id": ref_id,
-            "details": details,
-        }
-    )
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 # ============================================================
@@ -100,178 +35,126 @@ def log_workflow(
 
 @dataclass
 class ConversationContext:
-
     user_id: str = "akshaya"
-
-    last_intent: str | None = None
-
-    metadata: Dict[str, Any] = field(
-        default_factory=dict
-    )
-
-    # Conversation history used by the LLM.
-    history: List[Dict[str, str]] = field(
-        default_factory=list
-    )
+    last_intent: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    history: List[Dict[str, str]] = field(default_factory=list)
 
 
 # ============================================================
-# WORKBUDDY KNOWLEDGE BASE
+# WORKFLOW LOGS
 # ============================================================
-#
-# This is intentionally lightweight.
-#
-# It is NOT a database.
-#
-# Later, this can be replaced with:
-# - company documents
-# - Cloudant
-# - vector database
-# - RAG
-# - IBM watsonx knowledge sources
-#
-# For now, it gives the LLM grounded company-style
-# information instead of allowing it to invent policies.
+
+WORKFLOW_LOGS = []
+
+
+def add_workflow_log(
+    action: str,
+    status: str = "Completed",
+    details: str = ""
+):
+    WORKFLOW_LOGS.append({
+        "action": action,
+        "status": status,
+        "details": details
+    })
+
+
+# ============================================================
+# WORKBUDDY KNOWLEDGE
 # ============================================================
 
 WORKBUDDY_KNOWLEDGE = {
 
-    "leave_policy": {
-        "title": "Leave Policy",
-        "content": """
-Planned leave should normally be requested in advance according
-to the organization's leave process.
+    "leave_policy": """
+    Leave Policy:
+    - Employees should inform their manager before taking planned leave.
+    - Leave requests should follow the organization's internal leave process.
+    - For planned personal events, employees should communicate the expected dates
+      and reason to their manager.
+    - Emergency or unexpected leave should be communicated as soon as possible.
+    - WorkBuddy provides guidance and drafting assistance but does not approve leave
+      or calculate leave balances.
+    """,
 
-Employees should communicate the requested dates and reason
-appropriately to their reporting manager.
+    "attendance_policy": """
+    Attendance Guidance:
+    - Employees are expected to follow their organization's working hours.
+    - If an employee expects to be absent or late, they should communicate with
+      their manager according to company procedures.
+    - WorkBuddy can explain general attendance guidance but cannot modify attendance
+      records.
+    """,
 
-For urgent or emergency situations, employees should contact
-their reporting manager as soon as possible.
+    "work_from_home": """
+    Work From Home Guidance:
+    - Employees should follow the organization's WFH policy and approval process.
+    - Planned WFH should normally be communicated to the manager in advance.
+    - WorkBuddy can help explain the process or draft a communication.
+    """,
 
-Leave requests remain subject to the organization's applicable
-approval process.
-"""
-    },
+    "it_access": """
+    IT Access Guidance:
+    - Employees requiring access to workplace tools should raise an access request
+      through the organization's approved IT process.
+    - Examples may include Jira, GitHub, Microsoft Teams, VPN, email systems,
+      development environments, or other internal tools.
+    - WorkBuddy can explain the process and draft an access request.
+    - WorkBuddy does not actually grant permissions.
+    """,
 
-    "attendance_policy": {
-        "title": "Attendance Policy",
-        "content": """
-Employees are expected to follow the organization's working
-hours and attendance requirements.
+    "it_support": """
+    IT Support Guidance:
+    - For technical problems, employees should describe the problem, affected
+      application/device, and any error message.
+    - WorkBuddy can provide troubleshooting guidance.
+    - If the issue requires the IT team, WorkBuddy can help draft a support ticket.
+    """,
 
-If an employee expects to be absent or delayed, they should
-inform their reporting manager according to the applicable
-workplace process.
+    "onboarding": """
+    Onboarding Guidance:
+    - New employees generally need to complete organizational, HR, security,
+      and technical onboarding activities.
+    - WorkBuddy can explain onboarding steps and help prepare questions or
+      communications.
+    - WorkBuddy does not mark onboarding tasks as officially completed.
+    """,
 
-For attendance-related concerns, employees can contact HR
-or their reporting manager for clarification.
-"""
-    },
-
-    "work_from_home": {
-        "title": "Work From Home Guidance",
-        "content": """
-Work-from-home arrangements depend on organizational policy,
-team requirements, role requirements, and manager approval.
-
-Employees should follow the applicable internal process when
-requesting remote work.
-"""
-    },
-
-    "it_access": {
-        "title": "IT Access Guidance",
-        "content": """
-Employees who require access to workplace tools such as
-Jira, Salesforce, GitHub, VPN, email systems, or analytics
-platforms should follow the organization's IT access process.
-
-Requests should normally include the employee's role,
-required application, and business justification when needed.
-"""
-    },
-
-    "it_support": {
-        "title": "IT Support Guidance",
-        "content": """
-For technical problems, employees should first describe the
-issue clearly, including the affected application or device.
-
-Depending on the problem, IT support may require details such
-as screenshots, error messages, device information, or the
-time when the issue occurred.
-"""
-    },
-
-    "onboarding": {
-        "title": "Employee Onboarding Guidance",
-        "content": """
-New employees may need to complete onboarding documentation,
-receive their device, obtain required system access, configure
-VPN or workplace tools, and connect with their reporting
-manager and team.
-
-The exact onboarding requirements depend on the employee's
-role and organization.
-"""
-    },
-
-    "workplace_communication": {
-        "title": "Workplace Communication Guidance",
-        "content": """
-Professional workplace communication should normally be clear,
-concise, respectful, and include the relevant request,
-dates, context, and any action required from the recipient.
-"""
-    },
-
+    "workplace_communication": """
+    Workplace Communication:
+    - WorkBuddy can draft professional emails, messages, requests, explanations,
+      and letters.
+    - The user can ask for formal, casual, concise, polite, or detailed versions.
+    """
 }
 
 
 # ============================================================
-# LLM RESPONSE SCHEMA
+# STRUCTURED LLM RESPONSE
 # ============================================================
 
 class WorkBuddyResponse(BaseModel):
 
     agent: str = Field(
-        description=(
-            "The most appropriate WorkBuddy area handling "
-            "the request. Use one of: HR Agent, IT Agent, "
-            "Onboarding Agent, General Assistant."
-        )
+        description="The WorkBuddy area handling the request."
     )
 
     intent: str = Field(
-        description=(
-            "A concise description of the user's intent, "
-            "such as leave_guidance, policy_question, "
-            "email_drafting, it_support, it_access, "
-            "onboarding_guidance, general_workplace_help."
-        )
+        description="The user's main intent."
     )
 
     response: str = Field(
-        description=(
-            "The complete natural-language response that "
-            "should be shown to the employee."
-        )
+        description="Natural language response to the employee."
     )
 
     actions: List[str] = Field(
         default_factory=list,
-        description=(
-            "Useful next-step options WorkBuddy can offer "
-            "the employee. Keep them concise."
-        )
+        description="Helpful next actions WorkBuddy can suggest."
     )
 
     knowledge_used: List[str] = Field(
         default_factory=list,
-        description=(
-            "Names of the WorkBuddy knowledge topics used "
-            "to answer the request."
-        )
+        description="Knowledge categories used to answer."
     )
 
 
@@ -280,483 +163,342 @@ class WorkBuddyResponse(BaseModel):
 # ============================================================
 
 SYSTEM_INSTRUCTION = """
-You are WorkBuddy, an intelligent workplace employee copilot.
+You are WorkBuddy, an AI-powered workplace copilot.
 
-Your role is to help employees with everyday HR, IT,
-onboarding, workplace-policy, and professional-communication
-questions.
+Your purpose is to help employees understand workplace processes and communicate
+with HR and IT teams.
 
-You are conversational and proactive.
+You are conversational and should understand natural language rather than relying
+on keywords.
 
 IMPORTANT BEHAVIOR:
 
-1. UNDERSTAND NATURAL LANGUAGE
-
-Do not require users to use commands such as:
-"check leave balance"
-"request access"
-"start onboarding"
-
-Understand normal human statements.
+1. Understand the employee's situation.
 
 Example:
 
-User:
+Employee:
 "I have a family event next week."
 
-Understand that the user may be seeking leave guidance even
-though they did not explicitly say "leave".
+You should understand that the employee may be talking about planned leave.
 
-2. DO NOT TURN WORKBUDDY INTO A LEAVE MANAGEMENT SYSTEM
+A helpful response could explain the relevant leave guidance and offer:
+"Would you like me to draft a leave email to your manager?"
 
-Do NOT calculate leave balances.
+Do NOT simply ask the user to type "leave".
 
-Do NOT approve or reject leave.
+2. Maintain conversational context.
 
-Do NOT invent employee records.
-
-Do NOT pretend to submit an official leave request unless
-a real action tool has been implemented.
-
-Instead, provide guidance and offer useful help such as:
-
-- explaining the relevant policy
-- drafting a leave application
-- formatting an email to a manager
-- preparing a formal letter
-- helping the user communicate the request
-
-3. USE PROVIDED KNOWLEDGE
-
-When a workplace policy is relevant, use the supplied
-WorkBuddy knowledge.
-
-Do not invent company-specific policies.
-
-If the knowledge provided does not contain an answer,
-clearly say that the employee should confirm the exact
-policy with HR or the appropriate internal team.
-
-4. BE PROACTIVE
-
-After answering, suggest one or two useful next steps.
-
-For example:
-
-"Would you like me to draft a formal email to your manager?"
-
-or:
-
-"I can also format this as a leave application letter
-if you'd like."
-
-Do not overwhelm the user with a huge menu.
-
-5. DOCUMENT GENERATION
-
-If the user asks for an email, letter, message,
-application, checklist, or similar document, generate it
-directly.
-
-Use professional but natural language.
-
-6. FOLLOW-UP CONTEXT
-
-Use the previous conversation when answering follow-up
-questions.
-
-Example:
-
-User:
-"I have a family event next week."
-
-Assistant:
-"You can apply for leave according to the applicable
-leave policy. Would you like an email format?"
-
-User:
+If the user says:
 "Yes, make it formal."
 
-Understand that "it" refers to the leave email.
+Understand that they are referring to the previous request.
 
-7. HR
-
-Help with:
-- leave guidance
-- attendance guidance
+3. You can help with:
 - HR policies
-- workplace questions
-- communication with managers
-- HR-related document drafting
+- Leave guidance
+- Attendance guidance
+- WFH guidance
+- IT support
+- IT access guidance
+- Onboarding guidance
+- Workplace questions
+- Professional emails
+- Leave letters
+- IT support messages
+- Access request drafts
 
-8. IT
+4. Do NOT behave like a traditional leave management system.
 
-Help with:
-- IT support guidance
-- software access guidance
-- troubleshooting
-- IT request drafting
-- access-request communication
+You must NOT:
+- calculate leave balances
+- approve leave
+- reject leave
+- modify attendance
+- grant IT permissions
+- mark onboarding tasks as officially completed
+- pretend that an action happened when it did not
 
-Do not claim that access was actually granted unless a real
-IT tool has been connected.
+5. You may suggest what the employee should do next.
 
-9. ONBOARDING
+For example:
+- Contact the manager
+- Raise an IT request
+- Provide an error message
+- Prepare an email
+- Follow the organization's process
 
-Help with:
-- onboarding checklists
-- new-joiner preparation
-- workplace setup guidance
-- required tools
-- manager/team communication
-- onboarding document drafting
+6. When drafting an email or letter:
+- Make it professional
+- Keep it natural
+- Include placeholders where information is missing
+- Do not invent employee-specific facts
 
-Do not claim that an employee account, laptop, VPN, or access
-was actually created.
+7. Use the provided WorkBuddy knowledge when relevant.
 
-10. GENERAL QUESTIONS
+Do not invent company-specific policies that are not provided.
 
-For general workplace questions, behave like a helpful
-employee copilot.
+8. If the user asks something unrelated to HR, IT, onboarding, or workplace
+assistance, politely explain that WorkBuddy is designed for workplace assistance
+and still try to help if the request is reasonably related.
 
-11. TONE
+9. Keep responses clear and human.
+Avoid unnecessary technical explanations.
 
-Be friendly, professional, concise, and useful.
-
-Do not sound like a rigid chatbot.
-
-12. IBM WATSONX ORCHESTRATE
-
-WorkBuddy is conceptually designed around agentic orchestration
-and digital skills similar to an IBM watsonx Orchestrate setup.
-
-Do not falsely claim that a live watsonx Orchestrate workflow
-was executed unless an actual integration has been connected.
+10. Never claim that IBM watsonx Orchestrate is actively executing a workflow
+unless a real IBM integration has been implemented.
 """
 
 
 # ============================================================
-# KNOWLEDGE CONTEXT BUILDER
+# FORMAT KNOWLEDGE
 # ============================================================
 
-def build_knowledge_context() -> str:
-    """
-    Convert the local WorkBuddy knowledge base into a compact
-    context block for the LLM.
-    """
+def format_knowledge() -> str:
 
-    sections = []
+    knowledge_text = ""
 
-    for key, article in WORKBUDDY_KNOWLEDGE.items():
+    for category, content in WORKBUDDY_KNOWLEDGE.items():
 
-        sections.append(
-            f"""
-### {article['title']}
-Knowledge ID: {key}
-
-{article['content'].strip()}
-"""
+        knowledge_text += (
+            f"\n--- {category.upper()} ---\n"
+            f"{content}\n"
         )
 
-    return "\n".join(sections)
+    return knowledge_text
 
 
 # ============================================================
-# CONVERSATION HISTORY
+# FORMAT CONVERSATION HISTORY
 # ============================================================
 
-def build_conversation_context(
-    ctx: ConversationContext,
-) -> str:
+def format_history(history: List[Dict[str, str]]) -> str:
 
-    if not ctx.history:
+    if not history:
         return "No previous conversation."
 
-    recent_history = ctx.history[-10:]
+    recent_history = history[-8:]
 
-    lines = []
+    formatted = []
 
-    for item in recent_history:
+    for message in recent_history:
 
-        role = item.get(
-            "role",
-            "user"
-        )
+        role = message.get("role", "user")
+        content = message.get("content", "")
 
-        content = item.get(
-            "content",
-            ""
-        )
-
-        lines.append(
+        formatted.append(
             f"{role.upper()}: {content}"
         )
 
-    return "\n".join(lines)
+    return "\n".join(formatted)
 
 
 # ============================================================
-# GEMINI CALL
+# LLM CALL
 # ============================================================
 
-def generate_llm_response(
-    message: str,
-    ctx: ConversationContext,
+def ask_workbuddy_llm(
+    user_message: str,
+    context: ConversationContext
 ) -> WorkBuddyResponse:
 
     if client is None:
 
         raise RuntimeError(
-            "GEMINI_API_KEY is not configured. "
-            "Create a .env file and add GEMINI_API_KEY."
+            "GEMINI_API_KEY is not configured."
         )
-
-
-    knowledge_context = build_knowledge_context()
-
-    conversation_context = build_conversation_context(
-        ctx
-    )
-
 
     prompt = f"""
-{SYSTEM_INSTRUCTION}
+WORKBUDDY KNOWLEDGE:
 
-============================================================
-WORKBUDDY KNOWLEDGE
-============================================================
+{format_knowledge()}
 
-{knowledge_context}
 
-============================================================
-PREVIOUS CONVERSATION
-============================================================
+PREVIOUS CONVERSATION:
 
-{conversation_context}
+{format_history(context.history)}
 
-============================================================
-CURRENT USER MESSAGE
-============================================================
 
-{message}
+CURRENT EMPLOYEE MESSAGE:
 
-============================================================
-TASK
-============================================================
+{user_message}
 
-Understand what the employee means.
 
-Use relevant WorkBuddy knowledge when appropriate.
+Respond as WorkBuddy.
 
-Respond naturally.
+Understand the intent from the meaning of the message and the conversation
+context.
 
-If the user appears to need a workplace action but no real
-action tool exists, provide guidance and offer to help prepare
-the required communication rather than pretending the action
-was completed.
+If useful, suggest one or more practical next actions.
 
-Return the required structured response.
+If the user appears to need an email, letter, request, or message, proactively
+offer to draft it.
 """
 
-
-    log_workflow(
-        agent="WorkBuddy",
-        skill="UnderstandUserRequest",
-        status="Started",
-        details="Sending natural-language request to LLM",
-    )
-
-
     response = client.models.generate_content(
-        model=MODEL_NAME,
+
+        model=GEMINI_MODEL,
+
         contents=prompt,
+
         config=types.GenerateContentConfig(
+
             system_instruction=SYSTEM_INSTRUCTION,
+
+            temperature=0.4,
+
             response_mime_type="application/json",
-            response_schema=WorkBuddyResponse,
-            temperature=0.7,
-        ),
-    )
 
-
-    if not response.text:
-        raise RuntimeError(
-            "The LLM returned an empty response."
+            response_schema=WorkBuddyResponse
         )
-
-
-    result = WorkBuddyResponse.model_validate_json(
-        response.text
     )
 
-
-    log_workflow(
-        agent=result.agent,
-        skill="GenerateWorkplaceResponse",
-        status="Completed",
-        details=(
-            f"Intent: {result.intent}; "
-            f"Knowledge: {', '.join(result.knowledge_used) or 'None'}"
-        ),
-    )
-
-
-    return result
+    return response.parsed
 
 
 # ============================================================
 # FALLBACK RESPONSE
 # ============================================================
 
-def fallback_response(
-    message: str,
-) -> WorkBuddyResponse:
-
-    """
-    Used only when the LLM is unavailable.
-
-    This is intentionally NOT a keyword-based fake AI router.
-    It simply tells the user that the AI service needs to be
-    configured.
-    """
+def fallback_response(user_message: str):
 
     return WorkBuddyResponse(
+
         agent="🤖 WorkBuddy",
-        intent="llm_unavailable",
+
+        intent="general_workplace_assistance",
+
         response=(
-            "I'm ready to help, but my AI service is not "
-            "configured yet. Please add your Gemini API key "
-            "to the project's `.env` file and restart WorkBuddy."
+            "I'm having trouble connecting to the AI service right now. "
+            "Please make sure the Gemini API is configured correctly and try again."
         ),
+
         actions=[
-            "Configure the LLM API",
-            "Try your question again",
+            "Check the AI configuration",
+            "Try the message again"
         ],
-        knowledge_used=[],
+
+        knowledge_used=[]
     )
 
 
 # ============================================================
-# MAIN ENTRY POINT
+# MAIN WORKBUDDY HANDLER
 # ============================================================
 
 def handle_user_message(
-    message: str,
-    ctx: ConversationContext,
-) -> Tuple[str, ConversationContext, Dict[str, Any]]:
+    user_message: str,
+    context: ConversationContext
+):
 
-    """
-    Main interface used by app.py.
+    user_message = user_message.strip()
 
-    Returns:
+    if not user_message:
 
-        reply
-        updated conversation context
-        metadata
-    """
-
-    message = message.strip()
-
-    if not message:
-
-        result = WorkBuddyResponse(
-            agent="🤖 WorkBuddy",
-            intent="empty_message",
-            response=(
-                "I'm here! Tell me what you need help with — "
-                "HR, IT, onboarding, workplace policies, "
-                "or even drafting an email."
-            ),
-            actions=[
-                "Ask about an HR policy",
-                "Ask for workplace assistance",
-            ],
+        return (
+            "Tell me what you need help with, and I'll do my best to assist.",
+            context,
+            {
+                "agent": "🤖 WorkBuddy",
+                "intent": "empty_message",
+                "actions": []
+            }
         )
 
-    else:
-
-        try:
-
-            result = generate_llm_response(
-                message,
-                ctx,
-            )
-
-        except Exception as exc:
-
-            print(
-                "WorkBuddy LLM error:",
-                repr(exc)
-            )
-
-            log_workflow(
-                agent="WorkBuddy",
-                skill="GenerateWorkplaceResponse",
-                status="Failed",
-                details=str(exc),
-            )
-
-            result = fallback_response(
-                message
-            )
-
-
     # --------------------------------------------------------
-    # UPDATE CONVERSATION CONTEXT
+    # Save user message
     # --------------------------------------------------------
 
-    ctx.last_intent = result.intent
+    context.history.append({
+        "role": "user",
+        "content": user_message
+    })
 
+    try:
 
-    ctx.history.append(
-        {
-            "role": "user",
-            "content": message,
+        result = ask_workbuddy_llm(
+            user_message,
+            context
+        )
+
+        # ----------------------------------------------------
+        # Update context
+        # ----------------------------------------------------
+
+        context.last_intent = result.intent
+
+        context.metadata = {
+            "agent": result.agent,
+            "knowledge_used": result.knowledge_used
         }
-    )
 
+        # ----------------------------------------------------
+        # Save assistant response
+        # ----------------------------------------------------
 
-    ctx.history.append(
-        {
+        context.history.append({
             "role": "assistant",
-            "content": result.response,
-        }
-    )
+            "content": result.response
+        })
 
+        # ----------------------------------------------------
+        # Workflow logging
+        # ----------------------------------------------------
 
-    # Keep the context reasonably small.
-    if len(ctx.history) > 20:
+        add_workflow_log(
 
-        ctx.history = ctx.history[-20:]
+            action=f"LLM understood: {result.intent}",
 
+            status="Completed",
 
-    # --------------------------------------------------------
-    # STORE LAST RESPONSE METADATA
-    # --------------------------------------------------------
+            details=(
+                f"Agent: {result.agent} | "
+                f"Knowledge: {', '.join(result.knowledge_used)}"
+            )
+        )
 
-    ctx.metadata = {
-        "agent": result.agent,
-        "intent": result.intent,
-        "actions": result.actions,
-        "knowledge_used": result.knowledge_used,
-        "timestamp": datetime.datetime.now().isoformat(),
-    }
+        return (
 
+            result.response,
 
-    # --------------------------------------------------------
-    # METADATA SENT BACK TO APP.PY
-    # --------------------------------------------------------
+            context,
 
-    metadata = {
-        "agent": result.agent,
-        "intent": result.intent,
-        "actions": result.actions,
-        "knowledge_used": result.knowledge_used,
-    }
+            {
+                "agent": result.agent,
+                "intent": result.intent,
+                "actions": result.actions
+            }
+        )
 
+    except Exception as e:
 
-    return (
-        result.response,
-        ctx,
-        metadata,
-    )
+        error_message = str(e)
+
+        add_workflow_log(
+
+            action="LLM response generation",
+
+            status="Failed",
+
+            details=error_message
+        )
+
+        fallback = fallback_response(user_message)
+
+        context.history.append({
+            "role": "assistant",
+            "content": fallback.response
+        })
+
+        return (
+
+            fallback.response,
+
+            context,
+
+            {
+                "agent": fallback.agent,
+                "intent": fallback.intent,
+                "actions": fallback.actions
+            }
+        )
